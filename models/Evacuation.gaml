@@ -9,36 +9,65 @@
 model Evacuation
 
 global {
-	int population_size <- 1000;
-	int neighbours_distance <- 10;
-	geometry shelter_location; // Define the location of the shelter
+	int population_size <- 1000 parameter: "Population Size";
+	float evacuationRadius <- 10.0 parameter: "Evacuation Observation Radius";
+	float evacuationProbability <- 0.1 parameter: "Evacuation Probability upon Observation";
+	int evacuated_population <- 0;
+	geometry shelter_location; // Define the location of the largest building as a shelter
 	init {
-	// Initialize residents and the shelter
-	// Randomly inform 10% of the population
+	// Initialize the building and road network
+	// Assume the shelter_location is defined here
+
+	// Create inhabitants
+		create inhabitant number: population_size {
+			home <- one_of(building).location; // Assuming buildings are defined
+			location <- home;
+			isInformed <- flip(0.1); // 10% of the population is initially informed
+		}
+
+	}
+
+	reflex update_simulation {
+		evacuated_population <- length(inhabitant where (each.isInformed and each.location = shelter_location));
+		if (evacuated_population = population_size) {
+			do pause;
+		}
+
 	}
 
 }
 
-species resident skills: [moving] {
+species building {
+	geometry shape;
+	int height;
+
+	aspect default {
+		draw shape color: #gray;
+	}
+
+}
+
+species inhabitant skills: [moving] {
 	bool isInformed <- false;
 	bool isEvacuating <- false;
 	point home;
 	point location <- home;
-	float evacuationRadius <- 10.0; // Khoảng cách quan sát người khác sơ tán
-	float evacuateProbability <- 0.1; // Xác suất bắt đầu sơ tán sau khi quan sát
-	list<resident> neighbours update: resident at_distance neighbours_distance;
-	// Được gọi mỗi chu kỳ để cập nhật trạng thái thông tin và quyết định sơ tán
-	reflex update_status {
-	// Nếu cư dân đã được thông báo và chưa bắt đầu sơ tán
+
+	aspect default {
+		draw circle(5) color: isInformed ? #blue : #gray;
+	}
+
+	reflex check_evacuation {
 		if (isInformed and not isEvacuating) {
 			isEvacuating <- true;
+			do goto target: shelter_location;
 		} else if (not isInformed) {
-		// Kiểm tra xem có cư dân nào đang sơ tán trong phạm vi quan sát không
-			loop other over: neighbours {
-				if (other.isEvacuating and flip(evacuateProbability)) {
+			ask inhabitant at_distance evacuationRadius where (each.isEvacuating) {
+				if (flip(evacuationProbability)) {
 					isInformed <- true;
 					isEvacuating <- true;
-					break;
+					do goto target: shelter_location;
+					return;
 				}
 
 			}
@@ -47,16 +76,28 @@ species resident skills: [moving] {
 
 	}
 
-	// Di chuyển đến nơi trú ẩn nếu cư dân bắt đầu sơ tán
-	reflex move_towards_shelter {
-		if (isEvacuating) {
-			do goto target: shelter_location;
+}
+
+experiment EvacuationExperiment type: gui {
+	parameter "Population Size" var: population_size category: "Setup" min: 100 max: 10000;
+	parameter "Evacuation Observation Radius" var: evacuationRadius category: "Behavior" min: 1 max: 20;
+	parameter "Evacuation Probability upon Observation" var: evacuationProbability category: "Behavior" min: 0.0 max: 1.0;
+	output {
+		display PopulationMap type: opengl {
+			species inhabitant aspect: default;
+			species building; // Assuming building species is defined
+			// Additional visualization elements
+		}
+
+		display EvacuationStats type: 2d {
+			chart "Evacuation Status" type: series {
+				data "Informed" value: length(inhabitant where (each.isInformed));
+				data "Evacuated" value: evacuated_population;
+				data "Total Population" value: population_size;
+			}
+
 		}
 
 	}
 
-}
-
-experiment EvacuationExp type: gui {
-// Experiment setup and visualization
 }
