@@ -41,10 +41,20 @@ global {
 
 	}
 
+	reflex log_time_before_flooding {
+		float hours_to_flooding <- (flooding_date - current_date) / 60 / 60;
+		if (hours_to_flooding > 0) {
+			write "Time to flooding: " + hours_to_flooding + " hours";
+		} else {
+			write "Flooding is happening or has already happened.";
+		}
+
+	}
+
 }
 
 species building {
-// Building attributes
+
 	aspect default {
 		draw shape color: #gray;
 	}
@@ -52,7 +62,7 @@ species building {
 }
 
 species road {
-// Road attributes
+
 	aspect default {
 		draw shape color: #black;
 	}
@@ -60,7 +70,7 @@ species road {
 }
 
 species evacuation {
-// Evacuation point attributes
+
 	aspect default {
 		draw shape color: #red;
 	}
@@ -68,7 +78,7 @@ species evacuation {
 }
 
 species red_river {
-// River attributes
+// Red River attributes and visualization
 	aspect default {
 		draw shape color: #blue;
 	}
@@ -82,7 +92,7 @@ species inhabitant skills: [moving] {
 	point location <- home;
 
 	aspect default {
-		draw circle(5) color: isInformed ? #green : #gray;
+		draw circle(5) color: isInformed ? #blue : #gray;
 	}
 
 	reflex check_evacuation {
@@ -109,6 +119,8 @@ species inhabitant skills: [moving] {
 experiment EvacuationExperiment type: gui {
 	parameter "Population Size" var: population_size category: "Setup" min: 100 max: 10000;
 	output {
+		monitor "Current Time" value: current_date;
+		monitor "Time to Flooding" value: string((flooding_date - current_date) / 60 / 60) + " hours";
 		display PopulationMap type: opengl {
 			species building;
 			species road;
