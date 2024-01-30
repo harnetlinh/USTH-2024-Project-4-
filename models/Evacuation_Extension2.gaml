@@ -4,7 +4,7 @@
 * Author: hangoclinh
 * Tags: 
 */
-model Evacuation_Extension1
+model Evacuation_Extension2
 
 /* Insert your model definition here */
 global {
