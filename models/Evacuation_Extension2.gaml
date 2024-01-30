@@ -61,7 +61,12 @@ species building {
 	bool isShelter <- false;
 
 	aspect default {
-		draw shape color: isShelter ? #yellow : #gray;
+		if (isShelter) {
+			draw circle(20) color: #green;
+		} else {
+			draw shape color: #gray;
+		}
+
 	}
 
 }
@@ -75,7 +80,7 @@ species road {
 	}
 
 	aspect default {
-		draw shape color: #black;
+		draw shape + (1 + 5 * (1 - speed_rate)) color: #red;
 	}
 
 }
@@ -89,7 +94,7 @@ species inhabitant skills: [moving] {
 	point location <- home;
 
 	aspect default {
-		rgb color <- isInformed ? (isEvacuating ? #orange : #green) : #blue;
+		rgb color <- isInformed ? (isEvacuating ? #orange : #green) : #purple;
 		draw circle(5) color: color;
 	}
 
