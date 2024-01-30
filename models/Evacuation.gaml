@@ -17,13 +17,14 @@ global {
 	float step <- 10 #s;
 	building shelter;
 	point shelter_location;
+	list<building> shelters;
 
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
 		shelter <- one_of(building where (each.height = max(building collect each.height)));
-		shelter_location <- shelter.location; // Lưu trữ vị trí của nơi trú ẩn
+		shelter_location <- shelter.location;
 		ask shelter {
 			isShelter <- true;
 		}
@@ -50,7 +51,7 @@ species building {
 	bool isShelter <- false;
 
 	aspect default {
-		draw shape color: (isShelter ? #green : #gray); // Sử dụng màu xanh cho shelter
+		draw shape color: (isShelter ? #green : #gray); // the shelter is green
 	}
 
 }
@@ -74,11 +75,11 @@ species inhabitant skills: [moving] {
 	aspect default {
 		rgb color;
 		if (isEvacuating) {
-			color <- #orange; // Màu đỏ cho người đang sơ tán
+			color <- #orange; // is evacuating
 		} else if (isInformed) {
-			color <- #green; // Màu xanh lá cho người đã được thông báo
+			color <- #green; // they are informed
 		} else {
-			color <- #blue; // Màu xanh dương cho người chưa được thông báo
+			color <- #blue; // has not be informed
 		}
 
 		draw circle(5) color: color;
@@ -87,7 +88,7 @@ species inhabitant skills: [moving] {
 	reflex update_status {
 		if (isInformed and not isEvacuating) {
 			isEvacuating <- true;
-			target <- shelter_location; // Sử dụng trực tiếp biến toàn cục
+			target <- shelter_location;
 		} else if (not isInformed) {
 			list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isEvacuating);
 			if (length(nearbyEvacuating) > 0) {
@@ -95,7 +96,7 @@ species inhabitant skills: [moving] {
 					if (flip(0.1)) {
 						isInformed <- true;
 						isEvacuating <- true;
-						target <- shelter_location; // Sử dụng trực tiếp biến toàn cục
+						target <- shelter_location;
 					}
 
 				}
@@ -109,7 +110,7 @@ species inhabitant skills: [moving] {
 	reflex decise_target when: target = nil {
 		if (isInformed and isEvacuating) {
 			if (location = target) {
-				target <- nil; // Đã đến nơi trú ẩn
+				target <- nil; // at the shelter
 				isEvacuating <- false;
 			}
 
@@ -126,7 +127,7 @@ species inhabitant skills: [moving] {
 	reflex move when: target != nil {
 		do goto target: target on: road_network;
 		if (location = target) {
-			target <- nil; // Đã đến điểm ngẫu nhiên, sẵn sàng chọn điểm tiếp theo
+			target <- nil; // random movement
 		}
 
 	}
