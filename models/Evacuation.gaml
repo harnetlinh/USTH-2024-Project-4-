@@ -48,7 +48,7 @@ species building {
 	bool isShelter <- false;
 
 	aspect default {
-		draw shape color: (isShelter ? #gold : #gray);
+		draw shape color: (isShelter ? #green : #gray); // Sử dụng màu xanh cho shelter
 	}
 
 }
@@ -69,6 +69,15 @@ species inhabitant skills: [moving] {
 	point location <- home;
 
 	aspect default {
+		rgb color;
+		if (isEvacuating) {
+			color <- #red; // Màu đỏ cho người đang sơ tán
+		} else if (isInformed) {
+			color <- #green; // Màu xanh lá cho người đã được thông báo
+		} else {
+			color <- #blue; // Màu xanh dương cho người chưa được thông báo
+		}
+
 		draw circle(5) color: color;
 	}
 
