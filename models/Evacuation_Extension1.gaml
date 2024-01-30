@@ -15,13 +15,13 @@ global {
 	geometry shape <- envelope(shapefile_roads);
 	graph road_network;
 	float step <- 10 #s;
-	list<building> shelters; // Danh sách các nơi trú ẩn
+	list<building> shelters; // list shelter
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
 
-		// Chọn ngẫu nhiên một số lượng các nơi trú ẩn
+		// random pick a building to be a shelter
 		loop i from: 1 to: num_shelter {
 			ask one_of(building) {
 				isShelter <- true;
@@ -108,7 +108,7 @@ species inhabitant skills: [moving] {
 	}
 
 	reflex decise_target when: target = nil {
-	// Nếu đã được thông báo hoặc đang sơ tán, hướng đến nơi trú ẩn gần nhất
+	// if inhabitant is informed or evacuating, he will go directly to the closest shelter
 		if (isInformed and isEvacuating) {
 			building nearestShelter <- one_of(shelters closest_to location);
 			if (nearestShelter != nil) {
@@ -116,13 +116,13 @@ species inhabitant skills: [moving] {
 			}
 
 		} else {
-		// Nếu không được thông báo và không đang sơ tán, chọn một tòa nhà ngẫu nhiên
+		// If he has not be informed and not evacuating, he will random check a building if it is a shelter or not
 			building randomBuilding <- one_of(building);
 			if (randomBuilding != nil) {
 				target <- randomBuilding.location;
 			}
 
-			// Kiểm tra nếu gần nơi trú ẩn (trong khoảng 20m)
+			// check if the shelter is close to him (20m)
 			list<building> nearbyShelters <- list(building at_distance 10) where (each.isShelter);
 			if (nearbyShelters != nil) {
 				if (length(nearbyShelters) > 0) {
@@ -141,8 +141,8 @@ species inhabitant skills: [moving] {
 		if ((isEvacuating or (not isInformed)) and target != nil) {
 			do goto target: target on: road_network;
 			if (location = target) {
-				target <- nil; // Dừng lại khi đến nơi trú ẩn
-				isEvacuating <- false; // Cập nhật trạng thái không còn sơ tán
+				target <- nil; // Stop if he is in the shelter
+				isEvacuating <- false; // stop evacuating
 			}
 
 		}
