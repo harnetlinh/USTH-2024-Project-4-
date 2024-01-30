@@ -10,25 +10,31 @@ model Evacuation
 
 global {
 	int population_size <- 1000 parameter: "Population Size";
-	float evacuationRadius <- 10.0 parameter: "Evacuation Observation Radius";
-	float evacuationProbability <- 0.1 parameter: "Evacuation Probability upon Observation";
+	date flooding_date <- date([1980, 1, 2, 8, 30, 0]) parameter: "Flooding Date";
+	shape_file shapefile_buildings <- shape_file("../includes/buildings.shp");
+	shape_file shapefile_roads <- shape_file("../includes/clean_roads.shp");
+	shape_file shapefile_evacuation <- shape_file("../includes/evacuation.shp");
+	shape_file shapefile_river <- shape_file("../includes/RedRiver_scnr1.shp");
+	geometry shape <- envelope(shapefile_roads);
+	graph road_network;
 	int evacuated_population <- 0;
-	geometry shelter_location; // Define the location of the largest building as a shelter
-	init {
-	// Initialize the building and road network
-	// Assume the shelter_location is defined here
 
-	// Create inhabitants
+	init {
+		create building from: shapefile_buildings;
+		create road from: shapefile_roads;
+		road_network <- as_edge_graph(road);
+		create evacuation from: shapefile_evacuation;
+		create red_river from: shapefile_river;
 		create inhabitant number: population_size {
-			home <- one_of(building).location; // Assuming buildings are defined
+			home <- one_of(building).location;
 			location <- home;
-			isInformed <- flip(0.1); // 10% of the population is initially informed
+			isInformed <- flip(0.1);
 		}
 
 	}
 
 	reflex update_simulation {
-		evacuated_population <- length(inhabitant where (each.isInformed and each.location = shelter_location));
+		evacuated_population <- length(inhabitant where (each.isInformed and each.location = one_of(evacuation).location));
 		if (evacuated_population = population_size) {
 			do pause;
 		}
@@ -38,11 +44,33 @@ global {
 }
 
 species building {
-	geometry shape;
-	int height;
-
+// Building attributes
 	aspect default {
 		draw shape color: #gray;
+	}
+
+}
+
+species road {
+// Road attributes
+	aspect default {
+		draw shape color: #black;
+	}
+
+}
+
+species evacuation {
+// Evacuation point attributes
+	aspect default {
+		draw shape color: #red;
+	}
+
+}
+
+species red_river {
+// River attributes
+	aspect default {
+		draw shape color: #blue;
 	}
 
 }
@@ -54,19 +82,19 @@ species inhabitant skills: [moving] {
 	point location <- home;
 
 	aspect default {
-		draw circle(5) color: isInformed ? #blue : #gray;
+		draw circle(5) color: isInformed ? #green : #gray;
 	}
 
 	reflex check_evacuation {
 		if (isInformed and not isEvacuating) {
 			isEvacuating <- true;
-			do goto target: shelter_location;
+			do goto target: one_of(evacuation).location on: road_network;
 		} else if (not isInformed) {
-			ask inhabitant at_distance evacuationRadius where (each.isEvacuating) {
-				if (flip(evacuationProbability)) {
+			ask inhabitant at_distance 10 where (each.isEvacuating) {
+				if (flip(0.1)) {
 					isInformed <- true;
 					isEvacuating <- true;
-					do goto target: shelter_location;
+					do goto target: one_of(evacuation).location on: road_network;
 					return;
 				}
 
@@ -80,22 +108,13 @@ species inhabitant skills: [moving] {
 
 experiment EvacuationExperiment type: gui {
 	parameter "Population Size" var: population_size category: "Setup" min: 100 max: 10000;
-	parameter "Evacuation Observation Radius" var: evacuationRadius category: "Behavior" min: 1 max: 20;
-	parameter "Evacuation Probability upon Observation" var: evacuationProbability category: "Behavior" min: 0.0 max: 1.0;
 	output {
 		display PopulationMap type: opengl {
+			species building;
+			species road;
 			species inhabitant aspect: default;
-			species building; // Assuming building species is defined
-			// Additional visualization elements
-		}
-
-		display EvacuationStats type: 2d {
-			chart "Evacuation Status" type: series {
-				data "Informed" value: length(inhabitant where (each.isInformed));
-				data "Evacuated" value: evacuated_population;
-				data "Total Population" value: population_size;
-			}
-
+			species evacuation;
+			species red_river;
 		}
 
 	}
