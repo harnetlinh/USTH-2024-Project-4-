@@ -87,26 +87,46 @@ species inhabitant skills: [moving] {
 	reflex update_status {
 		if (isInformed and not isEvacuating) {
 			isEvacuating <- true;
-			target <- shelter_location; // Đặt mục tiêu là nơi trú ẩn
+			target <- shelter_location; // Sử dụng trực tiếp biến toàn cục
 		} else if (not isInformed) {
-			list<inhabitant> nearbyEvacuatingPeople <- list(inhabitant at_distance 10) where (each.isEvacuating);
-			if (length(nearbyEvacuatingPeople) > 0 and flip(0.1)) {
-				isInformed <- true;
-				isEvacuating <- true;
-				target <- shelter_location; // Đặt mục tiêu là nơi trú ẩn
+			list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isEvacuating);
+			if (length(nearbyEvacuating) > 0) {
+				ask one_of(nearbyEvacuating) {
+					if (flip(0.1)) {
+						isInformed <- true;
+						isEvacuating <- true;
+						target <- shelter_location; // Sử dụng trực tiếp biến toàn cục
+					}
+
+				}
+
 			}
 
 		}
 
 	}
 
-	reflex move {
-		if (target != nil) {
-			do goto target: target on: road_network;
+	reflex decise_target when: target = nil {
+		if (isInformed and isEvacuating) {
 			if (location = target) {
-				target <- nil;
+				target <- nil; // Đã đến nơi trú ẩn
+				isEvacuating <- false;
 			}
 
+		} else if not (isInformed and isEvacuating) {
+			building randomBuilding <- one_of(building);
+			if (randomBuilding != nil) {
+				target <- randomBuilding.location;
+			}
+
+		}
+
+	}
+
+	reflex move when: target != nil {
+		do goto target: target on: road_network;
+		if (location = target) {
+			target <- nil; // Đã đến điểm ngẫu nhiên, sẵn sàng chọn điểm tiếp theo
 		}
 
 	}
