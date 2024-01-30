@@ -16,12 +16,14 @@ global {
 	graph road_network;
 	float step <- 10 #s;
 	building shelter;
+	point shelter_location;
 
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
 		shelter <- one_of(building where (each.height = max(building collect each.height)));
+		shelter_location <- shelter.location; // Lưu trữ vị trí của nơi trú ẩn
 		ask shelter {
 			isShelter <- true;
 		}
@@ -66,12 +68,13 @@ species inhabitant skills: [moving] {
 	bool isInformed <- false;
 	bool isEvacuating <- false;
 	point home;
+	point target;
 	point location <- home;
 
 	aspect default {
 		rgb color;
 		if (isEvacuating) {
-			color <- #red; // Màu đỏ cho người đang sơ tán
+			color <- #orange; // Màu đỏ cho người đang sơ tán
 		} else if (isInformed) {
 			color <- #green; // Màu xanh lá cho người đã được thông báo
 		} else {
@@ -81,16 +84,27 @@ species inhabitant skills: [moving] {
 		draw circle(5) color: color;
 	}
 
-	reflex observe_and_evacuate {
-		list<inhabitant> nearbyEvacuatingPeople <- list(inhabitant at_distance 10) where (each.isEvacuating);
+	reflex update_status {
 		if (isInformed and not isEvacuating) {
 			isEvacuating <- true;
-			do goto target: shelter.location on: road_network;
+			target <- shelter_location; // Đặt mục tiêu là nơi trú ẩn
 		} else if (not isInformed) {
+			list<inhabitant> nearbyEvacuatingPeople <- list(inhabitant at_distance 10) where (each.isEvacuating);
 			if (length(nearbyEvacuatingPeople) > 0 and flip(0.1)) {
 				isInformed <- true;
 				isEvacuating <- true;
-				do goto target: shelter.location on: road_network;
+				target <- shelter_location; // Đặt mục tiêu là nơi trú ẩn
+			}
+
+		}
+
+	}
+
+	reflex move {
+		if (target != nil) {
+			do goto target: target on: road_network;
+			if (location = target) {
+				target <- nil;
 			}
 
 		}
