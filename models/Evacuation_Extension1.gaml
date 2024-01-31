@@ -36,7 +36,15 @@ global {
 		let informed_inhabitants <- list(inhabitant where (each.isInformed));
 		loop informed_inhabitant over: informed_inhabitants {
 			ask informed_inhabitant {
-				knowsShelterLocation <- flip(0.1);
+				if (flip(0.1)) {
+					isEvacuating <- true;
+					building nearestShelter <- one_of(shelters closest_to location);
+					if (nearestShelter != nil) {
+						target <- nearestShelter.location;
+					}
+
+				}
+
 			}
 
 		}
@@ -50,9 +58,9 @@ global {
 
 	}
 
-	reflex check_all_informed_evacuated {
+	reflex simulation_running_condition {
 	// Đếm số lượng cư dân đã được thông báo nhưng chưa sơ tán
-		int remaining_informed <- length(inhabitant where (each.isInformed and not each.isEvacuated));
+		int remaining_informed <- length(inhabitant where (not each.isInformed or each.isEvacuating));
 		int remaining_evacuated <- length(inhabitant where (each.isEvacuated));
 		// Nếu không còn cư dân nào chưa sơ tán, tạm dừng mô phỏng
 		if (remaining_informed = 0 or remaining_evacuated = population_size) {
@@ -94,9 +102,9 @@ species road {
 
 species inhabitant skills: [moving] {
 	bool isInformed <- false;
-	bool isEvacuating <- false;
+	bool isEvacuating <- false; // Evacuating means that the inhabitant has already known where the Shelter
 	bool isEvacuated <- false;
-	bool knowsShelterLocation <- false;
+	list<building> listCheckBuilding <- list(building);
 	point home;
 	point target;
 	point location <- home;
@@ -104,7 +112,7 @@ species inhabitant skills: [moving] {
 	aspect default {
 		rgb color;
 		if (isEvacuated) {
-			color <- #green; // Màu sắc cho người đã sơ tán tới nơi trú ẩn
+			color <- #green;
 		} else if (isEvacuating) {
 			color <- #orange;
 		} else if (isInformed) {
@@ -113,25 +121,20 @@ species inhabitant skills: [moving] {
 			color <- #cyan;
 		}
 
-		draw circle(5) color: color;
+		draw circle(4) color: color;
 	}
 
-	reflex update_status {
-		if (isInformed and not isEvacuating) {
-			isEvacuating <- true;
-			building nearestShelter <- one_of(shelters closest_to location);
-			if (nearestShelter != nil) {
-				target <- nearestShelter.location;
-			}
-
-		} else if (not isInformed) {
-			list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isEvacuating);
-			if (length(nearbyEvacuating) > 0 and flip(0.1)) {
-				isInformed <- true;
-				isEvacuating <- true;
+	reflex inform_evacuating when: (not isInformed and not isEvacuating and not isEvacuated) {
+		list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isInformed or each.isEvacuating);
+		// if an habitant who is not informed near an evacuating inhabitant, he will be informed with 10% chance
+		if (length(nearbyEvacuating) > 0 and flip(0.1)) {
+			isInformed <- true;
+			if (flip(0.1)) { // 10% chance to know where is the shelter
 				building nearestShelter <- one_of(shelters closest_to location);
 				if (nearestShelter != nil) {
 					target <- nearestShelter.location;
+					isEvacuating <- true;
+					isInformed <- false;
 				}
 
 			}
@@ -140,34 +143,52 @@ species inhabitant skills: [moving] {
 
 	}
 
-	reflex decise_target when: target = nil {
-		if (isInformed and isEvacuating) {
-			building nearestShelter <- one_of(shelters closest_to location);
-			if (nearestShelter != nil) {
-				target <- nearestShelter.location;
-			}
-
-		} else if (not isInformed and not isEvacuating) {
-		// random moving
-			building randomBuilding <- one_of(building);
-			if (randomBuilding != nil) {
+	// informed inhabitant found the shelter
+	reflex check_shelter when: isInformed {
+		list<building> nearbyShelter <- list((building where each.isShelter) at_distance 20);
+		if (nearbyShelter != nil and length(nearbyShelter) > 0) {
+			isEvacuating <- true;
+			isInformed <- false;
+			target <- nearbyShelter[0].location;
+		} else {
+			building randomBuilding <- one_of(listCheckBuilding);
+			if (randomBuilding != nil and target = nil) {
 				target <- randomBuilding.location;
+				remove randomBuilding from: listCheckBuilding;
 			}
 
 		}
 
 	}
 
-	reflex move {
-		if ((not isEvacuated) and target != nil) {
-			do goto target: target on: road_network;
-			if (location = target) {
-				target <- nil; // stop if inhabitant is in the shelter
-				if (isEvacuating) {
-					isEvacuated <- true; // Cập nhật trạng thái isEvacuated
-					isEvacuating <- false;
-				}
+	reflex just_moving when: target = nil and (not isInformed and not isEvacuating and not isEvacuated) {
 
+	// random moving
+		building randomBuilding <- one_of(building where not each.isShelter);
+		if (randomBuilding != nil) {
+			target <- randomBuilding.location;
+		}
+
+	}
+
+	reflex evacuated when: isEvacuated {
+		target <- nil;
+		isEvacuating <- false;
+		isInformed <- false;
+	}
+
+	reflex evacuating when: isEvacuating and target = nil {
+		isEvacuating <- false;
+		isEvacuated <- true;
+	}
+
+	reflex move when: ((not isEvacuated) and target != nil) {
+		do goto target: target on: road_network;
+		if (location = target) {
+			target <- nil;
+			if (isEvacuating) {
+				isEvacuating <- true;
+				isInformed <- false;
 			}
 
 		}
@@ -184,9 +205,8 @@ experiment EvacuationExperiment type: gui {
 
 		monitor "Evacuating Population" value: length(inhabitant where (each.isEvacuating));
 		monitor "Informed Population" value: length(inhabitant where (each.isInformed));
-		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed));
+		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed and not each.isEvacuating and not each.isEvacuated));
 		monitor "Evacuated Population" value: length(inhabitant where (each.isEvacuated));
-		monitor "Number of people who knows Shelter Location" value: length(inhabitant where (each.knowsShelterLocation));
 		monitor "Number of Shelter" value: length(building where (each.isShelter));
 	}
 
