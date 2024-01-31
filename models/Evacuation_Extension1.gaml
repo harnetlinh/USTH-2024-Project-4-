@@ -6,34 +6,39 @@
 */
 model Evacuation_Extension1
 
-/* Insert your model definition here */
 global {
 	int population_size <- 1000 parameter: "population size";
-	int num_shelter <- 5 parameter: "Number of shelter";
+	int num_shelter <- 1 parameter: "Number of shelter";
 	shape_file shapefile_buildings <- shape_file("../includes/buildings.shp");
 	shape_file shapefile_roads <- shape_file("../includes/clean_roads.shp");
 	geometry shape <- envelope(shapefile_roads);
 	graph road_network;
 	float step <- 10 #s;
-	list<building> shelters; // list shelter
+	list<building> shelters; // List shelters
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
-
-		// random pick a building to be a shelter
-		loop i from: 1 to: num_shelter {
-			ask one_of(building) {
-				isShelter <- true;
-			}
-
+		// sortet buildings by area
+		let sorted_buildings <- reverse(building sort_by (each.shape.area));
+		loop i from: 0 to: (num_shelter - 1) {
+			sorted_buildings[i].isShelter <- true;
 		}
 
 		shelters <- building where (each.isShelter);
+		let non_shelter_buildings <- building where (not each.isShelter); // prevent any inhabitant in the shelter
 		create inhabitant number: population_size {
-			home <- any_location_in(one_of(building));
+			home <- any_location_in(one_of(non_shelter_buildings));
 			location <- home;
 			isInformed <- flip(0.1);
+		}
+
+		let informed_inhabitants <- list(inhabitant where (each.isInformed));
+		loop informed_inhabitant over: informed_inhabitants {
+			ask informed_inhabitant {
+				knowsShelterLocation <- flip(0.1);
+			}
+
 		}
 
 	}
@@ -45,6 +50,17 @@ global {
 
 	}
 
+	reflex check_all_informed_evacuated {
+	// Đếm số lượng cư dân đã được thông báo nhưng chưa sơ tán
+		int remaining_informed <- length(inhabitant where (each.isInformed and not each.isEvacuated));
+		int remaining_evacuated <- length(inhabitant where (each.isEvacuated));
+		// Nếu không còn cư dân nào chưa sơ tán, tạm dừng mô phỏng
+		if (remaining_informed = 0 or remaining_evacuated = population_size) {
+			do pause;
+		}
+
+	}
+
 }
 
 species building {
@@ -52,7 +68,12 @@ species building {
 	bool isShelter <- false;
 
 	aspect default {
-		draw shape color: isShelter ? #yellow : #gray;
+		if (isShelter) {
+			draw circle(20) color: #green;
+		} else {
+			draw shape color: #gray;
+		}
+
 	}
 
 }
@@ -74,12 +95,24 @@ species road {
 species inhabitant skills: [moving] {
 	bool isInformed <- false;
 	bool isEvacuating <- false;
+	bool isEvacuated <- false;
+	bool knowsShelterLocation <- false;
 	point home;
 	point target;
 	point location <- home;
 
 	aspect default {
-		rgb color <- isInformed ? (isEvacuating ? #orange : #green) : #blue;
+		rgb color;
+		if (isEvacuated) {
+			color <- #green; // Màu sắc cho người đã sơ tán tới nơi trú ẩn
+		} else if (isEvacuating) {
+			color <- #orange;
+		} else if (isInformed) {
+			color <- #red;
+		} else {
+			color <- #cyan;
+		}
+
 		draw circle(5) color: color;
 	}
 
@@ -108,29 +141,17 @@ species inhabitant skills: [moving] {
 	}
 
 	reflex decise_target when: target = nil {
-	// if inhabitant is informed or evacuating, he will go directly to the closest shelter
 		if (isInformed and isEvacuating) {
 			building nearestShelter <- one_of(shelters closest_to location);
 			if (nearestShelter != nil) {
 				target <- nearestShelter.location;
 			}
 
-		} else {
-		// If he has not be informed and not evacuating, he will random check a building if it is a shelter or not
+		} else if (not isInformed and not isEvacuating) {
+		// random moving
 			building randomBuilding <- one_of(building);
 			if (randomBuilding != nil) {
 				target <- randomBuilding.location;
-			}
-
-			// check if the shelter is close to him (20m)
-			list<building> nearbyShelters <- list(building at_distance 10) where (each.isShelter);
-			if (nearbyShelters != nil) {
-				if (length(nearbyShelters) > 0) {
-					isInformed <- true;
-					isEvacuating <- true;
-					target <- one_of(nearbyShelters).location;
-				}
-
 			}
 
 		}
@@ -138,18 +159,20 @@ species inhabitant skills: [moving] {
 	}
 
 	reflex move {
-		if ((isEvacuating or (not isInformed)) and target != nil) {
+		if ((not isEvacuated) and target != nil) {
 			do goto target: target on: road_network;
 			if (location = target) {
-				target <- nil; // Stop if he is in the shelter
-				isEvacuating <- false; // stop evacuating
+				target <- nil; // stop if inhabitant is in the shelter
+				if (isEvacuating) {
+					isEvacuated <- true; // Cập nhật trạng thái isEvacuated
+					isEvacuating <- false;
+				}
+
 			}
 
 		}
 
-	}
-
-}
+	} }
 
 experiment EvacuationExperiment type: gui {
 	output {
@@ -162,7 +185,8 @@ experiment EvacuationExperiment type: gui {
 		monitor "Evacuating Population" value: length(inhabitant where (each.isEvacuating));
 		monitor "Informed Population" value: length(inhabitant where (each.isInformed));
 		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed));
-		monitor "Evacuated Population" value: length(inhabitant where (each.isInformed and (not each.isEvacuating)));
+		monitor "Evacuated Population" value: length(inhabitant where (each.isEvacuated));
+		monitor "Number of people who knows Shelter Location" value: length(inhabitant where (each.knowsShelterLocation));
 		monitor "Number of Shelter" value: length(building where (each.isShelter));
 	}
 
