@@ -7,6 +7,7 @@
 model EvacuationExtension3
 
 global {
+	string alertStrategy <- "random";
 	int population_size <- 1000 parameter: "population size";
 	int num_shelter <- 5 parameter: "Number of shelter";
 	shape_file shapefile_buildings <- shape_file("../includes/buildings.shp");
@@ -27,6 +28,9 @@ global {
 			}
 
 		}
+		ask each inhabitant {
+	        distanceToNearestShelter <- min_of(shelters, distance_between(location, each.location));
+	    }
 
 		shelters <- building where (each.isShelter);
 		create inhabitant number: population_size {
@@ -41,7 +45,35 @@ global {
 
 			home <- any_location_in(one_of(building));
 			location <- home;
-			isInformed <- flip(0.1);
+		}
+		
+
+
+		switch alertStrategy {
+			match "random" {
+				list<inhabitant> informedInhabitants <- sample(inhabitant, round(population_size * 0.1));
+				ask informedInhabitants {
+					isInformed <- true;
+				}
+
+			}
+
+			match "furthest" {
+				let farthestInhabitants <- sort(inhabitant, desc true, each.home distance_to one_of(shelters).location);
+			    ask first_n_of(farthestInhabitants, round(population_size * 0.1)) {
+			        isInformed <- true;
+			    }
+
+			}
+
+			match "closest" {
+				let closestInhabitants <- sort_by_ascending(inhabitant, distance_between(each.home, one_of(shelters).location));
+				ask first_n_of(closestInhabitants, round(population_size * 0.1)) {
+					isInformed <- true;
+				}
+
+			}
+
 		}
 
 	}
@@ -85,6 +117,7 @@ species road {
 }
 
 species inhabitant skills: [moving] {
+	float distanceToNearestShelter <- 0.0;
 	string mobilityType;
 	bool isInformed <- false;
 	bool isEvacuating <- false;
@@ -206,6 +239,21 @@ experiment EvacuationExperiment type: gui {
 		monitor "Number of Pedestrians" value: length(inhabitant where (each.mobilityType = 'WALKING'));
 	}
 
+	init {
+		create simulation with: [alertStrategy::"random", name:: "RandomAlert"];
+		create simulation with: [alertStrategy::"furthest", name:: "FurthestAlert"];
+		create simulation with: [alertStrategy::"closest", name:: "ClosestAlert"];
+	}
+
+}
+
+experiment BatchEvacuation type: batch {
+	parameter "Alert Strategy" var: alertStrategy category: "Initial Conditions";
+	parameter "Population Size" var: population_size category: "Initial Conditions" min: 100 max: 2000 step: 100;
+	parameter "Alert Time Before Flooding" var: alertTimeBeforeFlooding category: "Initial Conditions" min: 10 #s max: 1 #h step: 5 #m;
+	measure "Evacuation Time" value: last_value(time) aggregate: avg;
+	measure "Total Evacuees" value: length(inhabitant where (each.isEvacuating)) aggregate: avg;
+	stop when: length(inhabitant where (each.isInformed and (not each.isEvacuating))) = population_size;
 }
 
 
