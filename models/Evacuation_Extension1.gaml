@@ -59,10 +59,9 @@ global {
 	}
 
 	reflex simulation_running_condition {
-	// Đếm số lượng cư dân đã được thông báo nhưng chưa sơ tán
 		int remaining_informed <- length(inhabitant where (not each.isInformed or each.isEvacuating));
 		int remaining_evacuated <- length(inhabitant where (each.isEvacuated));
-		// Nếu không còn cư dân nào chưa sơ tán, tạm dừng mô phỏng
+		// If there is no body know about the infor and evacutation or all inhabitant have been evacuated
 		if (remaining_informed = 0 or remaining_evacuated = population_size) {
 			do pause;
 		}
@@ -104,7 +103,7 @@ species inhabitant skills: [moving] {
 	bool isInformed <- false;
 	bool isEvacuating <- false; // Evacuating means that the inhabitant has already known where the Shelter
 	bool isEvacuated <- false;
-	list<building> listCheckBuilding <- list(building);
+	list<building> listCheckBuilding <- list(building); // to prevent the habitant check same building more than 1 times
 	point home;
 	point target;
 	point location <- home;

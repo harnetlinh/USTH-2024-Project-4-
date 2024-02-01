@@ -6,43 +6,49 @@
 */
 model Evacuation_Extension2
 
-/* Insert your model definition here */
 global {
 	int population_size <- 1000 parameter: "population size";
-	int num_shelter <- 5 parameter: "Number of shelter";
+	int num_shelter <- 1 parameter: "Number of shelter";
 	shape_file shapefile_buildings <- shape_file("../includes/buildings.shp");
 	shape_file shapefile_roads <- shape_file("../includes/clean_roads.shp");
 	geometry shape <- envelope(shapefile_roads);
 	graph road_network;
 	float step <- 10 #s;
-	list<building> shelters; // list shelter
+	list<building> shelters; // List shelters
+	map<road, float> new_weights;
+
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
-
-		// random pick a building to be a shelter
-		loop i from: 1 to: num_shelter {
-			ask one_of(building) {
-				isShelter <- true;
-			}
-
+		// sortet buildings by area
+		let sorted_buildings <- reverse(building sort_by (each.shape.area));
+		loop i from: 0 to: (num_shelter - 1) {
+			sorted_buildings[i].isShelter <- true;
 		}
 
 		shelters <- building where (each.isShelter);
+		let non_shelter_buildings <- building where (not each.isShelter); // prevent any inhabitant in the shelter
 		create inhabitant number: population_size {
-			float rand <- rnd(100);
-			if (rand < 20) {
-				mobilityType <- "CAR";
-			} else if (rand < 90) {
-				mobilityType <- "MOTORCYCLE";
-			} else {
-				mobilityType <- "WALKING";
-			}
-
-			home <- any_location_in(one_of(building));
+			home <- any_location_in(one_of(non_shelter_buildings));
 			location <- home;
 			isInformed <- flip(0.1);
+		}
+
+		let informed_inhabitants <- list(inhabitant where (each.isInformed));
+		loop informed_inhabitant over: informed_inhabitants {
+			ask informed_inhabitant {
+				if (flip(0.1)) {
+					isEvacuating <- true;
+					building nearestShelter <- one_of(shelters closest_to location);
+					if (nearestShelter != nil) {
+						target <- nearestShelter.location;
+					}
+
+				}
+
+			}
+
 		}
 
 	}
@@ -50,6 +56,16 @@ global {
 	reflex update_speed {
 		ask road {
 			speed_rate <- max(exp(-length(inhabitant at_distance 1) / (1 + shape.perimeter / 10)), 0.1);
+		}
+
+	}
+
+	reflex simulation_running_condition {
+		int remaining_informed <- length(inhabitant where (not each.isInformed or each.isEvacuating));
+		int remaining_evacuated <- length(inhabitant where (each.isEvacuated));
+		// If there is no body know about the infor and evacutation or all inhabitant have been evacuated
+		if (remaining_informed = 0 or remaining_evacuated = population_size) {
+			do pause;
 		}
 
 	}
@@ -80,7 +96,7 @@ species road {
 	}
 
 	aspect default {
-		draw shape + (1 + 5 * (1 - speed_rate)) color: #red;
+		draw shape + (1 + 5 * (1 - speed_rate)) color: #black;
 	}
 
 }
@@ -88,62 +104,40 @@ species road {
 species inhabitant skills: [moving] {
 	string mobilityType;
 	bool isInformed <- false;
-	bool isEvacuating <- false;
+	bool isEvacuating <- false; // Evacuating means that the inhabitant has already known where the Shelter
+	bool isEvacuated <- false;
+	list<building> listCheckBuilding <- list(building); // to prevent the habitant check same building more than 1 times
 	point home;
 	point target;
 	point location <- home;
+	road currentRoad;
 
 	aspect default {
-		rgb color <- isInformed ? (isEvacuating ? #orange : #green) : #purple;
-		draw circle(5) color: color;
+		rgb color;
+		if (isEvacuated) {
+			color <- #green;
+		} else if (isEvacuating) {
+			color <- #orange;
+		} else if (isInformed) {
+			color <- #red;
+		} else {
+			color <- #cyan;
+		}
+
+		draw circle(4) color: color;
 	}
 
-	reflex update_status {
-		if (isInformed and not isEvacuating) {
-			isEvacuating <- true;
-			building nearestShelter <- one_of(shelters closest_to location);
-			if (nearestShelter != nil) {
-				target <- nearestShelter.location;
-			}
-
-		} else if (not isInformed) {
-			list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isEvacuating);
-			if (length(nearbyEvacuating) > 0 and flip(0.1)) {
-				isInformed <- true;
-				isEvacuating <- true;
+	reflex inform_evacuating when: (not isInformed and not isEvacuating and not isEvacuated) {
+		list<inhabitant> nearbyEvacuating <- (inhabitant at_distance 10) where (each.isInformed or each.isEvacuating);
+		// if an habitant who is not informed near an evacuating inhabitant, he will be informed with 10% chance
+		if (length(nearbyEvacuating) > 0 and flip(0.1)) {
+			isInformed <- true;
+			if (flip(0.1)) { // 10% chance to know where is the shelter
 				building nearestShelter <- one_of(shelters closest_to location);
 				if (nearestShelter != nil) {
 					target <- nearestShelter.location;
-				}
-
-			}
-
-		}
-
-	}
-
-	reflex decise_target when: target = nil {
-	// if inhabitant is informed or evacuating, he will go directly to the closest shelter
-		if (isInformed and isEvacuating) {
-			building nearestShelter <- one_of(shelters closest_to location);
-			if (nearestShelter != nil) {
-				target <- nearestShelter.location;
-			}
-
-		} else {
-		// If he has not be informed and not evacuating, he will random check a building if it is a shelter or not
-			building randomBuilding <- one_of(building);
-			if (randomBuilding != nil) {
-				target <- randomBuilding.location;
-			}
-
-			// check if the shelter is close to him (20m)
-			list<building> nearbyShelters <- list(building at_distance 10) where (each.isShelter);
-			if (nearbyShelters != nil) {
-				if (length(nearbyShelters) > 0) {
-					isInformed <- true;
 					isEvacuating <- true;
-					target <- one_of(nearbyShelters).location;
+					isInformed <- false;
 				}
 
 			}
@@ -152,42 +146,89 @@ species inhabitant skills: [moving] {
 
 	}
 
-	reflex move {
-		if ((isEvacuating or (not isInformed)) and target != nil) {
-			float speedFactor;
-			switch (mobilityType) {
-				match "CAR" {
-					speedFactor <- 1.0;
-				}
-
-				match "MOTORCYCLE" {
-					speedFactor <- 0.85;
-				}
-
-				default {
-					speedFactor <- 0.1; // WALKING
-				}
-
-			}
-
-			// Calculate traffic density
-			float trafficDensity <- length(road at_distance 1);
-			float trafficImpactFactor <- (mobilityType = "CAR" ? 10 : (mobilityType = "MOTORCYCLE" ? 20 : 50));
-			float trafficFactor <- exp(-trafficDensity / trafficImpactFactor);
-
-			// Calculate the final travel speed after adding the traffic jam factor
-			speed <- speedFactor * trafficFactor;
-			do goto target: target on: road_network;
-			if (location = target) {
-				target <- nil;
-				isEvacuating <- false;
+	// informed inhabitant found the shelter
+	reflex check_shelter when: isInformed {
+		list<building> nearbyShelter <- (building where each.isShelter) at_distance 20;
+		if (nearbyShelter != nil and length(nearbyShelter) > 0) {
+			isEvacuating <- true;
+			isInformed <- false;
+			target <- nearbyShelter[0].location;
+		} else {
+			building randomBuilding <- one_of(listCheckBuilding);
+			if (randomBuilding != nil and target = nil) {
+				target <- randomBuilding.location;
+				remove randomBuilding from: listCheckBuilding;
 			}
 
 		}
 
 	}
 
-}
+	reflex just_moving when: target = nil and (not isInformed and not isEvacuating and not isEvacuated) {
+
+	// random moving
+		building randomBuilding <- one_of(building where not each.isShelter);
+		if (randomBuilding != nil) {
+			target <- randomBuilding.location;
+		}
+
+	}
+
+	reflex evacuated when: isEvacuated {
+		target <- nil;
+		isEvacuating <- false;
+		isInformed <- false;
+	}
+
+	reflex evacuating when: isEvacuating and target = nil {
+		isEvacuating <- false;
+		isEvacuated <- true;
+	}
+
+	reflex update_current_road {
+	// Xác định đoạn đường mà inhabitant đang ở
+		list<road> roads_at_location <- list(road where (each overlaps location));
+		if (roads_at_location != nil and length(roads_at_location) > 0) {
+			currentRoad <- roads_at_location[0]; // Chọn đoạn đường đầu tiên trong danh sách
+		}
+
+	}
+
+	reflex move when: ((not isEvacuated) and target != nil) {
+		float speedFactor;
+		float trafficImpactFactor;
+		switch (mobilityType) {
+			match "CAR" {
+				speedFactor <- 100.0;
+				trafficImpactFactor <- 10.0;
+			}
+
+			match "MOTORCYCLE" {
+				speedFactor <- 85.0;
+				trafficImpactFactor <- 20.0;
+			}
+
+			default {
+				speedFactor <- 10.0; // WALKING
+				trafficImpactFactor <- 50.0;
+			}
+
+		}
+
+		int trafficDensity <- length(inhabitant where (each.currentRoad = currentRoad));
+		float trafficFactor <- trafficImpactFactor / trafficDensity;
+		speed <- speedFactor * trafficFactor;
+		do goto target: target on: road_network;
+		if (location = target) {
+			target <- nil;
+			if (isEvacuating) {
+				isEvacuating <- true;
+				isInformed <- false;
+			}
+
+		}
+
+	} }
 
 experiment EvacuationExperiment type: gui {
 	output {
@@ -199,12 +240,9 @@ experiment EvacuationExperiment type: gui {
 
 		monitor "Evacuating Population" value: length(inhabitant where (each.isEvacuating));
 		monitor "Informed Population" value: length(inhabitant where (each.isInformed));
-		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed));
-		monitor "Evacuated Population" value: length(inhabitant where (each.isInformed and (not each.isEvacuating)));
+		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed and not each.isEvacuating and not each.isEvacuated));
+		monitor "Evacuated Population" value: length(inhabitant where (each.isEvacuated));
 		monitor "Number of Shelter" value: length(building where (each.isShelter));
-		monitor "Number of Car" value: length(inhabitant where (each.mobilityType = 'CAR'));
-		monitor "Number of Motobile" value: length(inhabitant where (each.mobilityType = 'MOTORCYCLE'));
-		monitor "Number of Pedestrians" value: length(inhabitant where (each.mobilityType = 'WALKING'));
 	}
 
 }
