@@ -21,8 +21,9 @@ global {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
 		road_network <- as_edge_graph(road);
-		// sortet buildings by area
+		// sorted buildings by area
 		let sorted_buildings <- reverse(building sort_by (each.shape.area));
+		//		set the largest building to be the shelter
 		loop i from: 0 to: (num_shelter - 1) {
 			sorted_buildings[i].isShelter <- true;
 		}
@@ -44,11 +45,10 @@ global {
 
 	}
 
-	reflex check_all_informed_evacuated {
-	// Đếm số lượng cư dân đã được thông báo nhưng chưa sơ tán
-		int remaining_informed <- length(inhabitant where (each.isInformed and not each.isEvacuated));
+	reflex simulation_running_condition {
+		int remaining_informed <- length(inhabitant where (each.isInformed or each.isEvacuating));
 		int remaining_evacuated <- length(inhabitant where (each.isEvacuated));
-		// Nếu không còn cư dân nào chưa sơ tán, tạm dừng mô phỏng
+		// If there is no body know about the infor and evacutation or all inhabitant have been evacuated
 		if (remaining_informed = 0 or remaining_evacuated = population_size) {
 			do pause;
 		}
@@ -97,7 +97,7 @@ species inhabitant skills: [moving] {
 	aspect default {
 		rgb color;
 		if (isEvacuated) {
-			color <- #green; // Màu sắc cho người đã sơ tán tới nơi trú ẩn
+			color <- #green;
 		} else if (isEvacuating) {
 			color <- #orange;
 		} else if (isInformed) {
@@ -109,44 +109,44 @@ species inhabitant skills: [moving] {
 		draw circle(5) color: color;
 	}
 
-	reflex update_status {
-		if (isInformed and not isEvacuating) {
-			isEvacuating <- true;
+	reflex inform_evacuating when: (not isInformed and not isEvacuating and not isEvacuated) {
+		list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isInformed or each.isEvacuating);
+		// if an habitant who is not informed near an evacuating inhabitant, he will be informed with 10% chance
+		if (length(nearbyEvacuating) > 0 and flip(0.1)) {
+			isInformed <- true;
 			building nearestShelter <- one_of(shelters closest_to location);
 			if (nearestShelter != nil) {
 				target <- nearestShelter.location;
-			}
-
-		} else if (not isInformed) {
-			list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isEvacuating);
-			if (length(nearbyEvacuating) > 0 and flip(0.1)) {
-				isInformed <- true;
 				isEvacuating <- true;
-				building nearestShelter <- one_of(shelters closest_to location);
-				if (nearestShelter != nil) {
-					target <- nearestShelter.location;
-				}
-
+				isInformed <- false;
 			}
 
 		}
 
 	}
 
-	reflex decise_target when: target = nil {
-		if (isInformed and isEvacuating) {
-			building nearestShelter <- one_of(shelters closest_to location);
-			if (nearestShelter != nil) {
-				target <- nearestShelter.location;
-			}
+	reflex just_moving when: target = nil and (not isInformed and not isEvacuating and not isEvacuated) {
 
-		} else if (not isInformed and not isEvacuating) {
-		// random moving
-			building randomBuilding <- one_of(building);
-			if (randomBuilding != nil) {
-				target <- randomBuilding.location;
-			}
+	// random moving
+		building randomBuilding <- one_of(building where not each.isShelter);
+		if (randomBuilding != nil) {
+			target <- randomBuilding.location;
+		}
 
+	}
+
+	reflex evacuated when: isEvacuated {
+		target <- nil;
+		isEvacuating <- false;
+		isInformed <- false;
+	}
+
+	reflex isInformed when: isInformed and target = nil {
+		isEvacuating <- true;
+		isInformed <- false;
+		building nearestShelter <- one_of(shelters closest_to location);
+		if (nearestShelter != nil) {
+			target <- nearestShelter.location;
 		}
 
 	}
@@ -157,7 +157,7 @@ species inhabitant skills: [moving] {
 			if (location = target) {
 				target <- nil; // stop if inhabitant is in the shelter
 				if (isEvacuating) {
-					isEvacuated <- true; // Cập nhật trạng thái isEvacuated
+					isEvacuated <- true;
 					isEvacuating <- false;
 				}
 
@@ -177,7 +177,7 @@ experiment EvacuationExperiment type: gui {
 
 		monitor "Evacuating Population" value: length(inhabitant where (each.isEvacuating));
 		monitor "Informed Population" value: length(inhabitant where (each.isInformed));
-		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed));
+		monitor "Not Informed Population" value: length(inhabitant where (not each.isInformed and not each.isEvacuating and not each.isEvacuated));
 		monitor "Evacuated Population" value: length(inhabitant where (each.isEvacuated));
 		monitor "Number of Shelter" value: length(building where (each.isShelter));
 	}

@@ -1,10 +1,10 @@
 /**
-* Name: Evacuation_Extension1
+* Name: EvacuationExtension3v2
 * Based on the internal empty template. 
 * Author: hangoclinh
 * Tags: 
 */
-model Evacuation_Extension1
+model EvacuationExtension3v2
 
 global {
 	int population_size <- 1000 parameter: "population size";
@@ -15,6 +15,9 @@ global {
 	graph road_network;
 	float step <- 10 #s;
 	list<building> shelters; // List shelters
+	map<road, float> new_weights;
+	string alertStrategy <- "random";
+
 	init {
 		create building from: shapefile_buildings;
 		create road from: shapefile_roads;
@@ -30,21 +33,59 @@ global {
 		create inhabitant number: population_size {
 			home <- any_location_in(one_of(non_shelter_buildings));
 			location <- home;
-			isInformed <- flip(0.1);
-		}
+			let informed_inhabitants <- list(inhabitant where (each.isInformed));
+			loop informed_inhabitant over: informed_inhabitants {
+				ask informed_inhabitant {
+					if (flip(0.1)) {
+						isEvacuating <- true;
+						building nearestShelter <- one_of(shelters closest_to location);
+						if (nearestShelter != nil) {
+							target <- nearestShelter.location;
+						}
 
-		let informed_inhabitants <- list(inhabitant where (each.isInformed));
-		loop informed_inhabitant over: informed_inhabitants {
-			ask informed_inhabitant {
-				if (flip(0.1)) {
-					isEvacuating <- true;
-					building nearestShelter <- one_of(shelters closest_to location);
-					if (nearestShelter != nil) {
-						target <- nearestShelter.location;
 					}
 
 				}
 
+			}
+
+		}
+		// Strategy
+		switch alertStrategy {
+		// random Strategy
+			match "random" {
+				ask inhabitant {
+					if (flip(0.1)) {
+						isInformed <- true;
+					}
+
+				}
+
+			}
+			//	furthest Strategy
+			match "furthest" {
+				loop i from: 1 to: (length(inhabitant) * 0.1) {
+					inhabitant _inh <- (inhabitant where (not each.isInformed)) farthest_to one_of(shelters);
+					ask _inh {
+						isInformed <- true;
+					}
+
+				}
+
+			}
+			// closest Strategy
+			match "closest" {
+				loop i from: 1 to: (length(inhabitant) * 0.1) {
+					inhabitant _inh <- (inhabitant where (not each.isInformed)) closest_to one_of(shelters);
+					ask _inh {
+						isInformed <- true;
+					}
+
+				}
+
+			}
+
+			default {
 			}
 
 		}
@@ -94,12 +135,13 @@ species road {
 	}
 
 	aspect default {
-		draw shape color: #black;
+		draw shape + (1 + 5 * (1 - speed_rate)) color: #black;
 	}
 
 }
 
 species inhabitant skills: [moving] {
+	string mobilityType;
 	bool isInformed <- false;
 	bool isEvacuating <- false; // Evacuating means that the inhabitant has already known where the Shelter
 	bool isEvacuated <- false;
@@ -107,6 +149,7 @@ species inhabitant skills: [moving] {
 	point home;
 	point target;
 	point location <- home;
+	road currentRoad;
 
 	aspect default {
 		rgb color;
@@ -124,7 +167,7 @@ species inhabitant skills: [moving] {
 	}
 
 	reflex inform_evacuating when: (not isInformed and not isEvacuating and not isEvacuated) {
-		list<inhabitant> nearbyEvacuating <- list(inhabitant at_distance 10) where (each.isInformed or each.isEvacuating);
+		list<inhabitant> nearbyEvacuating <- (inhabitant at_distance 10) where (each.isInformed or each.isEvacuating);
 		// if an habitant who is not informed near an evacuating inhabitant, he will be informed with 10% chance
 		if (length(nearbyEvacuating) > 0 and flip(0.1)) {
 			isInformed <- true;
@@ -144,7 +187,7 @@ species inhabitant skills: [moving] {
 
 	// informed inhabitant found the shelter
 	reflex check_shelter when: isInformed {
-		list<building> nearbyShelter <- list((building where each.isShelter) at_distance 20);
+		list<building> nearbyShelter <- (building where each.isShelter) at_distance 20;
 		if (nearbyShelter != nil and length(nearbyShelter) > 0) {
 			isEvacuating <- true;
 			isInformed <- false;
@@ -181,7 +224,39 @@ species inhabitant skills: [moving] {
 		isEvacuated <- true;
 	}
 
+	reflex update_current_road {
+	// Detect the current road of the inhabitant
+		list<road> roads_at_location <- list(road where (each overlaps location));
+		if (roads_at_location != nil and length(roads_at_location) > 0) {
+			currentRoad <- roads_at_location[0]; // 
+		}
+
+	}
+
 	reflex move when: ((not isEvacuated) and target != nil) {
+		float speedFactor;
+		float trafficImpactFactor;
+		switch (mobilityType) {
+			match "CAR" {
+				speedFactor <- 100.0;
+				trafficImpactFactor <- 10.0;
+			}
+
+			match "MOTORCYCLE" {
+				speedFactor <- 85.0;
+				trafficImpactFactor <- 20.0;
+			}
+
+			default {
+				speedFactor <- 10.0; // WALKING
+				trafficImpactFactor <- 50.0;
+			}
+
+		}
+
+		int trafficDensity <- length(inhabitant where (each.currentRoad = currentRoad));
+		float trafficFactor <- trafficImpactFactor / trafficDensity;
+		speed <- speedFactor * trafficFactor;
 		do goto target: target on: road_network;
 		if (location = target) {
 			target <- nil;
@@ -194,7 +269,7 @@ species inhabitant skills: [moving] {
 
 	} }
 
-experiment EvacuationExperiment type: gui {
+experiment EvacuationExperiment type: gui parallel: true {
 	output {
 		display PopulationMap type: opengl {
 			species building;
@@ -209,4 +284,41 @@ experiment EvacuationExperiment type: gui {
 		monitor "Number of Shelter" value: length(building where (each.isShelter));
 	}
 
+	init {
+		create simulation with: [alertStrategy::"random", name:: "RandomAlert"];
+		create simulation with: [alertStrategy::"furthest", name:: "FurthestAlert"];
+		create simulation with: [alertStrategy::"closest", name:: "ClosestAlert"];
+	}
+
 }
+
+experiment BatchEvacuation type: batch until: (length(inhabitant where (each.isEvacuated)) = population_size) or length(inhabitant where (not each.isInformed or
+each.isEvacuating)) = 0 {
+	method exploration with: [["alertStrategy"::"random"], ["alertStrategy"::"furthest"], ["alertStrategy"::"closest"]];
+	parameter "Alert Strategy" var: alertStrategy category: "Initial Conditions" among: ["random", "furthest", "closest"];
+	parameter "Population Size" var: population_size category: "Initial Conditions" min: 100 max: 2000 step: 100;
+	parameter "Alert Time Before Flooding" var: step category: "Initial Conditions" min: 5 max: 60 step: 5;
+
+	reflex end_of_simulation {
+		int cpt <- 0;
+		int totalEvacuated <- length(inhabitant where each.isEvacuated);
+		int totalTimeSpent <- cycle;
+		save [totalEvacuated, totalTimeSpent] to: "Result/output_file.csv" format: csv;
+	}
+
+	permanent {
+		display Comparison type: 2d {
+			chart "Number of Inhabitant" type: series {
+				data "Evacuated Inhabitant" value: length(inhabitant where each.isEvacuated) style: spline color: #blue;
+			}
+
+		}
+
+	}
+
+}
+	
+
+
+
+
